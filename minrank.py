@@ -274,6 +274,27 @@ graph_help = {
      21: (1252,1252)}}
 
 
+###########################################################
+# Precomputed canonical-label lookup for get_mr_from_list.
+#
+# Built once at import time: for each atlas graph with index i,
+# we store  (order, size, canon_key) -> min_rank  where
+# canon_key is the graph6 string of the canonical form.
+# This lets get_mr_from_list do one canonicalization call
+# instead of up-to-O(bucket-size) isomorphism checks.
+###########################################################
+
+_mr_by_canon = {}
+for _i, (_atlas_g, (_idx, _mr)) in enumerate(
+        zip(atlas_graphs[1:], min_ranks[1:]), start=1):
+    _n = _atlas_g.order()
+    _m = _atlas_g.size()
+    _key = (_n, _m, _atlas_g.canonical_label().graph6_string())
+    _mr_by_canon[_key] = _mr
+# Clean up temporary loop variables
+del _i, _atlas_g, _idx, _mr, _n, _m, _key
+
+
 def get_mr_from_list(graph):
     """
     If the graph's minimum rank is stored in the table, returns the
@@ -293,28 +314,26 @@ def get_mr_from_list(graph):
         False
     """
     #check to make sure graph can be found in list
-    if graph.order()>7:
+    if graph.order() > 7:
         return False
-    
-    order = graph.order() #number of vertices
-    size = graph.size() #number of edges
 
-    starting_index, ending_index = graph_help[order][size]
-    #look for graph and return minimum rank
-    for i in range(starting_index,ending_index+1):
-        if graph.is_isomorphic(atlas_graphs[i]):
-            return min_ranks[i][1]
+    order = graph.order()  # number of vertices
+    size = graph.size()    # number of edges
 
-    raise ValueError("This should never happen!")
+    # O(1) lookup via canonical label – avoids up to O(bucket-size)
+    # is_isomorphic calls that the old linear scan required.
+    canon_key = (order, size, graph.canonical_label().graph6_string())
+    return _mr_by_canon[canon_key]
 
 
-def zerosgame(graph, initial_set=[]):
+def zerosgame(graph, initial_set=None):
    """
    Apply the color-change rule to a given graph given an optional
    initial set.
 
    :param graph: the graph on which to apply the rule
-   :param initial_set: the set of "zero" (black) vertices in the graph
+   :param initial_set: the set of "zero" (black) vertices in the graph;
+       defaults to ``None``, which is treated as an empty list.
    
    :return: the list of zero (black) vertices in the resulting derived
         coloring
@@ -326,33 +345,55 @@ def zerosgame(graph, initial_set=[]):
         []
         sage: zerosgame(graphs.PathGraph(5),[0])
         [0, 1, 2, 3, 4]
-   """       
+   """
+   # Guard against the classic mutable-default-argument pitfall.
+   if initial_set is None:
+       initial_set = []
 
-   new_zero_set=set(initial_set)
-   zero_set=set([])
-   zero_neighbors={}
-   active_zero_set = set([])
-   inactive_zero_set = set([])
-   another_run=True
-   while another_run:
-       another_run=False
-       # Add the new zero vertices
-       zero_set.update(new_zero_set)
-       active_zero_set.update(new_zero_set)
-       active_zero_set.difference_update(inactive_zero_set)
-       zero_neighbors.update([[i, 
-                   set(graph.neighbors(i)).difference(zero_set)] 
-                              for i in new_zero_set])
-       # Find the next set of zero vertices
-       new_zero_set.clear()
-       inactive_zero_set.clear()
-       for v in active_zero_set:
-           zero_neighbors[v].difference_update(zero_set)
-           if len(zero_neighbors[v])==1:
-               new_zero_set.add(zero_neighbors[v].pop())
-               inactive_zero_set.add(v)
-               another_run=True
-   return list(zero_set)
+   # Build an incremental "white neighbor count" structure so we never
+   # reconstruct neighbor sets or perform repeated set differences.
+   # For each black vertex v, white_nbr_count[v] tracks how many of its
+   # neighbors are still white.  A black vertex can force its unique
+   # white neighbor to turn black.
+
+   black = set(initial_set)
+
+   # white_nbr_count[v] = number of white neighbors of v, for v in black
+   white_nbr_count = {}
+   for v in black:
+       white_nbr_count[v] = sum(1 for u in graph.neighbors(v) if u not in black)
+
+   # The "ready" queue holds black vertices that currently have exactly
+   # one white neighbor (they can fire immediately).
+   from collections import deque
+   queue = deque(v for v in black if white_nbr_count[v] == 1)
+
+   while queue:
+       v = queue.popleft()
+       # v may have already fired or had its count updated; re-check.
+       if white_nbr_count.get(v, 0) != 1:
+           continue
+
+       # Find v's unique remaining white neighbor and turn it black.
+       new_black = next(u for u in graph.neighbors(v) if u not in black)
+       black.add(new_black)
+
+       # Initialize the count for the newly-black vertex.
+       white_nbr_count[new_black] = sum(
+           1 for u in graph.neighbors(new_black) if u not in black)
+
+       # Update counts for all (previously-black) neighbors of new_black.
+       for u in graph.neighbors(new_black):
+           if u in white_nbr_count:  # u was already black
+               white_nbr_count[u] -= 1
+               if white_nbr_count[u] == 1:
+                   queue.append(u)
+
+       # new_black itself may be immediately ready to fire.
+       if white_nbr_count[new_black] == 1:
+           queue.append(new_black)
+
+   return list(black)
 
 
 def zero_forcing_set_bruteforce(graph, bound=None, all_sets=False):
@@ -460,26 +501,40 @@ def has_forbidden_induced_subgraph(graph):
     K333 = Graph({0: [3,4,5,6,7,8], 1: [3,4,5,6,7,8], \
                   2: [3,4,5,6,7,8], 3: [6,7,8], \
                   4: [6,7,8], 5: [6,7,8]})
+
+    # Precompute sorted degree sequences of the forbidden patterns so
+    # we can cheaply reject candidate vertex-sets before running the
+    # more expensive induced-subgraph isomorphism test.
+    _path_degs = sorted(path.degree_sequence())
+    _fish_degs = sorted(fish.degree_sequence())
+    _dart_degs = sorted(dart.degree_sequence())
+    _K333_degs = sorted(K333.degree_sequence())
+
     if order < 4:
         return False
-    for sub_vertices in Combinations(vertices,4): 
-        # Finds all order 4 induced subgraphs
-        if graph.subgraph(sub_vertices).is_isomorphic(path):
-            return True
+    for sub_vertices in Combinations(vertices, 4):
+        sub = graph.subgraph(sub_vertices)
+        if sorted(sub.degree_sequence()) == _path_degs:
+            if sub.is_isomorphic(path):
+                return True
     if order < 5:
         return False
-    for sub_vertices in Combinations(vertices,5): 
-        # Finds all order 5 induced subgraphs
-        if graph.subgraph(sub_vertices).is_isomorphic(dart):
-            return True
-        if graph.subgraph(sub_vertices).is_isomorphic(fish):
-            return True
+    for sub_vertices in Combinations(vertices, 5):
+        sub = graph.subgraph(sub_vertices)
+        sub_degs = sorted(sub.degree_sequence())
+        if sub_degs == _dart_degs:
+            if sub.is_isomorphic(dart):
+                return True
+        elif sub_degs == _fish_degs:
+            if sub.is_isomorphic(fish):
+                return True
     if order < 9:
         return False
-    for sub_vertices in Combinations(vertices,9): 
-        # Finds all order 9 induced subgraphs
-        if graph.subgraph(sub_vertices).is_isomorphic(K333):
-            return True
+    for sub_vertices in Combinations(vertices, 9):
+        sub = graph.subgraph(sub_vertices)
+        if sorted(sub.degree_sequence()) == _K333_degs:
+            if sub.is_isomorphic(K333):
+                return True
     return False
 
 
@@ -888,7 +943,7 @@ def cliques_containing_edge(self, edge):
         [0, 1, 2, 3, 4] 
         sage: graphs.PathGraph(5).cliques_containing_edge((1,3))
     """
-    vertex1,vertex1=edge
+    vertex1, vertex2 = edge
     potential_cliques=self.cliques_containing_vertex(vertex1)
 
     # sort the cliques containing vertex1 by order, largest first
