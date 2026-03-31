@@ -78,6 +78,11 @@ List of major functions
 #### `zero_forcing_wavefront.pyx`:
 * `zero_forcing_set_wavefront`
 
+#### `zero_forcing_wavefront_py.py` *(pure-Python / URL-loadable)*:
+* `zero_forcing_set_wavefront` — same algorithm as the `.pyx` version but implemented
+  in pure Python so it can be loaded directly from a URL in SageMath 10.7:
+  `load('https://raw.githubusercontent.com/hunnellm/mr_JG/master/zero_forcing_wavefront_py.py')`
+
 #### `minrank.py`:
 * `get_mr_from_list`
 * `zerosgame`
