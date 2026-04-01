@@ -51,12 +51,7 @@ setup(
             include_dirs=include_dirs,
             ),
 
-        Extension(
-            "Zq_c", # name of extension
-            ["Zq_c.pyx"], # filename of Cython source
-            include_dirs=include_dirs,
-            ),
-
+        # Zq_c is now a pure-Python module (Zq_c.py); no extension needed.
 
         # Extra options that could be specified in an extension tuple
         #language="c++",              # this causes Cython to create C++ source
