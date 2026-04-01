@@ -1,18 +1,31 @@
-import importlib
+import importlib.util
 import os
 
 
 def load_all():
+    """Import all .py files in the same directory as this module (non-recursive).
+
+    Returns a dict mapping module_name -> module for each successfully
+    imported module.  Excludes load_all.py itself.
+    """
     module_dict = {}
-    # Get the current directory of the script
     current_dir = os.path.dirname(os.path.realpath(__file__))
-    
-    # Iterate over all files in the current directory
-    for filename in os.listdir(current_dir):
-        # Check for .py files excluding this file
-        if filename.endswith('.py') and filename != 'load_all.py':
-            module_name = filename[:-3]  # Remove the .py extension
-            module_dict[module_name] = importlib.import_module(module_name)
+
+    for filename in sorted(os.listdir(current_dir)):
+        if not filename.endswith('.py') or filename == 'load_all.py':
+            continue
+        module_name = filename[:-3]
+        filepath = os.path.join(current_dir, filename)
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, filepath)
+            if spec is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module_dict[module_name] = module
+        except Exception:
+            pass
+
     return module_dict
 
 
