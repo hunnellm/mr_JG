@@ -1023,8 +1023,8 @@ def edge_clique_cover_minimum(self, bound=None):
     edges_in_set_of_cliques = set([])
     for clique in mandatory_cliques:
         edges_in_clique = [(clique[i], clique[j]) 
-                           for i in xrange(len(clique)) 
-                           for j in xrange(i+1,len(clique))]
+                           for i in range(len(clique)) 
+                           for j in range(i+1,len(clique))]
         edges_in_set_of_cliques.update(set(edges_in_clique))
     if len(edges_in_set_of_cliques) == num_edges:
         if bound is None or len(mandatory_cliques) <= bound:
@@ -1049,8 +1049,8 @@ def edge_clique_cover_minimum(self, bound=None):
             edges_in_set_of_cliques = set([])
             for clique in set_of_cliques+mandatory_cliques:
                 edges_in_clique = [(clique[i], clique[j]) 
-                                   for i in xrange(len(clique)) 
-                                   for j in xrange(i+1,len(clique))]
+                                   for i in range(len(clique)) 
+                                   for j in range(i+1,len(clique))]
                 edges_in_set_of_cliques.update(set(edges_in_clique))
             if len(edges_in_set_of_cliques) == num_edges:
                 return set_of_cliques+mandatory_cliques
